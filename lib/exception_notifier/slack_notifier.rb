@@ -15,15 +15,15 @@ module ExceptionNotifier
         @message_opts = options.fetch(:additional_parameters, {})
         @color = @message_opts.delete(:color) { 'danger' }
         @notifier = Slack::Notifier.new webhook_url, options
-      rescue
+      rescue StandardError
         @notifier = nil
       end
     end
 
-    def call(exception, options={})
+    def call(exception, options = {})
       errors_count = options[:accumulated_errors_count].to_i
       measure_word = errors_count > 1 ? errors_count : (exception.class.to_s =~ /^[aeiou]/i ? 'An' : 'A')
-      exception_name = "*#{measure_word}* `#{exception.class.to_s}`"
+      exception_name = "*#{measure_word}* `#{exception.class}`"
 
       if options[:env].nil?
         data = options[:data] || {}
@@ -39,28 +39,28 @@ module ExceptionNotifier
         text += "\n"
       end
 
-      clean_message = exception.message.gsub("`", "'")
-      fields = [ { title: 'Exception', value: clean_message } ]
+      clean_message = exception.message.tr('`', "'")
+      fields = [{ title: 'Exception', value: clean_message }]
 
-      fields.push({ title: 'Hostname', value: Socket.gethostname })
+      fields.push(title: 'Hostname', value: Socket.gethostname)
 
       if exception.backtrace
         formatted_backtrace = "```#{exception.backtrace.first(@backtrace_lines).join("\n")}```"
-        fields.push({ title: 'Backtrace', value: formatted_backtrace })
+        fields.push(title: 'Backtrace', value: formatted_backtrace)
       end
 
       unless data.empty?
         deep_reject(data, @ignore_data_if) if @ignore_data_if.is_a?(Proc)
-        data_string = data.map{|k,v| "#{k}: #{v}"}.join("\n")
-        fields.push({ title: 'Data', value: "```#{data_string}```" })
+        data_string = data.map { |k, v| "#{k}: #{v}" }.join("\n")
+        fields.push(title: 'Data', value: "```#{data_string}```")
       end
 
       fields.concat(@additional_fields) if @additional_fields
 
-      attchs = [color: @color, text: text, fields: fields, mrkdwn_in: %w(text fields)]
+      attchs = [color: @color, text: text, fields: fields, mrkdwn_in: %w[text fields]]
 
       if valid?
-        send_notice(exception, options, clean_message, @message_opts.merge(attachments: attchs)) do |msg, message_opts|
+        send_notice(exception, options, clean_message, @message_opts.merge(attachments: attchs)) do |_msg, message_opts|
           @notifier.ping '', message_opts
         end
       end
@@ -74,15 +74,10 @@ module ExceptionNotifier
 
     def deep_reject(hash, block)
       hash.each do |k, v|
-        if v.is_a?(Hash)
-          deep_reject(v, block)
-        end
+        deep_reject(v, block) if v.is_a?(Hash)
 
-        if block.call(k, v)
-          hash.delete(k)
-        end
+        hash.delete(k) if block.call(k, v)
       end
     end
-
   end
 end
